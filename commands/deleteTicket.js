@@ -1,4 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -13,18 +15,23 @@ module.exports = {
     const reason = interaction.options.getString('reason');
 
     try {
+      // Check if the channel is a ticket (starts with "X-" or "I-")
+      if (!channel.name.startsWith('X-') && !channel.name.startsWith('I-')) {
+        return interaction.reply({ content: 'This command can only be used in ticket channels.', flags: 'Ephemeral' });
+      }
+
       // Fetch the ticket from the database
       const [rows] = await pool.query('SELECT * FROM investigation_requests WHERE channel_id = ?', [channel.id]);
 
       if (rows.length === 0) {
-        return interaction.reply({ content: 'This channel is not associated with a ticket.', ephemeral: true });
+        return interaction.reply({ content: 'This channel is not associated with a ticket.', flags: 'Ephemeral' });
       }
 
       const ticket = rows[0];
 
       // Check if the ticket is closed
       if (ticket.status !== 'closed') {
-        return interaction.reply({ content: 'Only closed tickets can be deleted.', ephemeral: true });
+        return interaction.reply({ content: 'Only closed tickets can be deleted.', flags: 'Ephemeral' });
       }
 
       // Fetch all messages in the channel
@@ -47,11 +54,11 @@ module.exports = {
       // Delete the ticket from the database
       await pool.query('DELETE FROM investigation_requests WHERE channel_id = ?', [channel.id]);
 
-      // Reply to the user
-      await interaction.reply({ content: `Ticket deleted and transcript saved: ${channel.name}.txt`, ephemeral: true });
+      // Reply to the user (visible to everyone)
+      await interaction.reply({ content: `Ticket deleted and transcript saved: ${channel.name}.txt` });
     } catch (error) {
       console.error('Error deleting ticket:', error);
-      await interaction.reply({ content: 'There was an error deleting the ticket.', ephemeral: true });
+      await interaction.reply({ content: 'There was an error deleting the ticket.', flags: 'Ephemeral' });
     }
   },
 };
