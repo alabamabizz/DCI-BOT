@@ -1,6 +1,7 @@
 // index.js
 require('dotenv').config(); // Load environment variables from .env
 const { Client, GatewayIntentBits, Collection, Routes, REST } = require('discord.js');
+const mysql = require('mysql2/promise'); // Import the MySQL library
 const fs = require('fs');
 const path = require('path');
 
@@ -11,6 +12,14 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+});
+
+// Create a database connection pool
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
 });
 
 // Load commands from the /commands folder
@@ -65,8 +74,8 @@ client.on('interactionCreate', async interaction => {
     // Check if the command should use ephemeral replies
     const isEphemeral = ['investigationrequest', 'intelligencelog'].includes(interaction.commandName);
 
-    // Execute the command
-    await command.execute(interaction, isEphemeral);
+    // Execute the command with the database connection
+    await command.execute(interaction, isEphemeral, pool);
   } catch (error) {
     console.error(error);
     await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
