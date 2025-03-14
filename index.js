@@ -1,6 +1,6 @@
 // index.js
 require('dotenv').config(); // Load environment variables from .env
-const { Client, GatewayIntentBits, Collection, Routes, REST } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Routes, REST, EmbedBuilder } = require('discord.js');
 const mysql = require('mysql2/promise'); // Import the MySQL library
 const fs = require('fs');
 const path = require('path');
@@ -17,10 +17,26 @@ const client = new Client({
 // Create a database connection pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
+  port: process.env.DB_PORT || 3306, // Use the specified port or default to 3306
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 });
+
+// Test the database connection
+async function testDatabaseConnection() {
+  try {
+    const connection = await pool.getConnection();
+    console.log('Connected to the database!');
+    connection.release();
+  } catch (error) {
+    console.error('Error connecting to the database:', error);
+    throw error; // Re-throw the error to stop the bot
+  }
+}
 
 // Load commands from the /commands folder
 client.commands = new Collection();
@@ -59,8 +75,16 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 })();
 
 // Event: When the bot is ready
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  // Test the database connection when the bot starts
+  try {
+    await testDatabaseConnection();
+  } catch (error) {
+    console.error('Failed to connect to the database. Exiting...');
+    process.exit(1); // Exit the bot if the database connection fails
+  }
 });
 
 // Event: When a slash command is executed
@@ -78,7 +102,7 @@ client.on('interactionCreate', async interaction => {
     await command.execute(interaction, isEphemeral, pool);
   } catch (error) {
     console.error(error);
-    await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+    await interaction.reply({ content: 'There was an error while executing this command!', flags: 'Ephemeral' });
   }
 });
 

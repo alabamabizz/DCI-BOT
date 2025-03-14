@@ -64,78 +64,10 @@ module.exports = {
       await channel.send({ embeds: [embed] });
 
       // Reply to the user
-      await interaction.reply({ content: `Investigation request created: ${channelName}`, ephemeral: isEphemeral });
+      await interaction.reply({ content: `Investigation request created: ${channelName}`, flags: 'Ephemeral' });
     } catch (error) {
       console.error('Error creating investigation request:', error);
-      await interaction.reply({ content: 'There was an error creating your request.', ephemeral: true });
+      await interaction.reply({ content: 'There was an error creating your request.', flags: 'Ephemeral' });
     }
   },
 };
-
-// Helper function to get the next case number
-async function getNextCaseNumber(pool, tableName, clearanceType) {
-  // Query the database to find the highest case number for the given clearance level
-  const query = `SELECT request_id FROM ${tableName} WHERE request_id LIKE ? ORDER BY request_id DESC LIMIT 1`;
-  const [rows] = await pool.query(query, [`X-${clearanceType}-%`]);
-
-  let nextCaseNumber = 1;
-  if (rows.length > 0) {
-    const lastRequestId = rows[0].request_id;
-    const lastCaseNumber = parseInt(lastRequestId.split('-')[2], 10);
-    nextCaseNumber = lastCaseNumber + 1;
-  }
-
-  return String(nextCaseNumber).padStart(4, '0');
-}
-
-// Helper function to get roles based on the investigation's clearance level
-function getClearanceRoles(clearanceType, guild) {
-  const roles = [];
-
-  // Add High Command role (always has access)
-  const highCommandRole = guild.roles.cache.get(process.env.ROLE_HIGH_COMMAND);
-  if (highCommandRole) {
-    roles.push({
-      id: highCommandRole.id,
-      allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
-    });
-  }
-
-  // Add Command role for I-CL-01 and I-CL-02
-  if (clearanceType === '01' || clearanceType === '02') {
-    const commandRole = guild.roles.cache.get(process.env.ROLE_COMMAND);
-    if (commandRole) {
-      roles.push({
-        id: commandRole.id,
-        allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
-      });
-    }
-  }
-
-  // Add Lower Command role for I-CL-01
-  if (clearanceType === '01') {
-    const lowerCommandRole = guild.roles.cache.get(process.env.ROLE_LOWER_COMMAND);
-    if (lowerCommandRole) {
-      roles.push({
-        id: lowerCommandRole.id,
-        allow: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
-      });
-    }
-  }
-
-  return roles;
-}
-
-// Helper function to get the role ping based on the investigation's clearance level
-function getRolePing(clearanceType) {
-  switch (clearanceType) {
-    case '01':
-      return `<@&${process.env.ROLE_LOWER_COMMAND}>`; // Ping Lower Command
-    case '02':
-      return `<@&${process.env.ROLE_COMMAND}>`; // Ping Command
-    case '03':
-      return `<@&${process.env.ROLE_HIGH_COMMAND}>`; // Ping High Command
-    default:
-      return 'the appropriate role'; // Fallback
-  }
-}
