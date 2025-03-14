@@ -95,14 +95,54 @@ client.on('interactionCreate', async interaction => {
   if (!command) return;
 
   try {
-    // Check if the command should use ephemeral replies
-    const isEphemeral = ['investigationrequest', 'intelligencelog'].includes(interaction.commandName);
-
-    // Execute the command with the database connection
-    await command.execute(interaction, isEphemeral, pool);
+    // Execute the command with the database connection pool
+    await command.execute(interaction, pool); // Pass the pool object here
   } catch (error) {
     console.error(error);
     await interaction.reply({ content: 'There was an error while executing this command!', flags: 'Ephemeral' });
+  }
+});
+
+// Logging function
+async function logCommand(interaction, commandName) {
+  const logChannel = interaction.guild.channels.cache.get(process.env.LOG_CHANNEL_ID);
+  if (!logChannel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle('Command Executed')
+    .setDescription(`**Command:** ${commandName}`)
+    .addFields(
+      { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+      { name: 'Channel', value: `${interaction.channel.name} (${interaction.channel.id})`, inline: true },
+    )
+    .setThumbnail(interaction.user.displayAvatarURL())
+    .setColor('#00FF00') // Green color for logs
+    .setTimestamp();
+
+  await logChannel.send({ embeds: [embed] });
+}
+
+// Log bot startup
+client.once('ready', async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  const logChannel = client.channels.cache.get(process.env.LOG_CHANNEL_ID);
+  if (logChannel) {
+    const embed = new EmbedBuilder()
+      .setTitle('Bot Started')
+      .setDescription('The bot has successfully started.')
+      .setColor('#00FF00') // Green color for logs
+      .setTimestamp();
+
+    await logChannel.send({ embeds: [embed] });
+  }
+
+  // Test the database connection
+  try {
+    await testDatabaseConnection();
+  } catch (error) {
+    console.error('Failed to connect to the database. Exiting...');
+    process.exit(1); // Exit the bot if the database connection fails
   }
 });
 

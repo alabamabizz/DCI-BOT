@@ -10,8 +10,8 @@ function isTicketChannel(channelName) {
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('close')
-    .setDescription('Close an investigation or intelligence request.'),
+    .setName('save')
+    .setDescription('Save the transcript of a ticket.'),
   async execute(interaction, pool) {
     const channel = interaction.channel;
 
@@ -59,31 +59,14 @@ module.exports = {
         });
       }
 
-      // Rename the channel to "closed-X-YY-ZZZZ" or "closed-I-YY-ZZZZ"
-      const newChannelName = channel.name.toLowerCase().startsWith('closed-')
-        ? channel.name // Already closed, no need to rename
-        : channel.name.startsWith('x-')
-          ? channel.name.replace('x-', 'closed-x-')
-          : channel.name.replace('i-', 'closed-i-');
-
-      await channel.setName(newChannelName);
-
-      // Send an embed message to indicate the ticket is closed
-      const embed = new EmbedBuilder()
-        .setTitle('Ticket Closed')
-        .setDescription('This request has been closed.')
-        .setColor('#FF0000'); // Red color for emphasis
-
-      await channel.send({ embeds: [embed] });
-
       // Reply to the user
-      await interaction.reply({ content: `Ticket closed: ${newChannelName}`, flags: 'Ephemeral' });
+      await interaction.reply({ content: `Transcript saved: ${channel.name}.txt`, flags: 'Ephemeral' });
 
       // Log the command
-      await logCommand(interaction, 'close');
+      await logCommand(interaction, 'save');
     } catch (error) {
-      console.error('Error closing ticket:', error);
-      await interaction.reply({ content: 'There was an error closing the ticket.', flags: 'Ephemeral' });
+      console.error('Error saving transcript:', error);
+      await interaction.reply({ content: 'There was an error saving the transcript.', flags: 'Ephemeral' });
     }
   },
 };
