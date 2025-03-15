@@ -2,12 +2,6 @@ const { SlashCommandBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-// Helper function to check if a channel is a ticket
-function isTicketChannel(channelName) {
-  const prefixes = ['x-', 'i-', 'closed-x-', 'closed-i-'];
-  return prefixes.some(prefix => channelName.toLowerCase().startsWith(prefix));
-}
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('retrieve')

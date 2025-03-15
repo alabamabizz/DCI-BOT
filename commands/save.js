@@ -1,11 +1,10 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-// Helper function to check if a channel is a ticket
-function isTicketChannel(channelName) {
-  const prefixes = ['x-', 'i-', 'closed-x-', 'closed-i-'];
-  return prefixes.some(prefix => channelName.toLowerCase().startsWith(prefix));
+function generateHash() {
+  return crypto.randomBytes(16).toString('hex');
 }
 
 module.exports = {
@@ -16,54 +15,74 @@ module.exports = {
     const channel = interaction.channel;
 
     try {
-      // Check if the channel is a ticket (including closed tickets)
-      if (!isTicketChannel(channel.name)) {
-        return interaction.reply({ content: 'This command can only be used in ticket channels.', flags: 'Ephemeral' });
+      const [rows] = await pool.query('SELECT request_id FROM investigation_requests WHERE channel_id = ?', [channel.id]);
+      const originalTicketId = rows[0]?.request_id;
+
+      if (!originalTicketId) {
+        return interaction.reply({ content: 'This channel is not associated with a ticket.', flags: 'Ephemeral' });
       }
 
-      // Fetch all messages in the channel
       const messages = await channel.messages.fetch({ limit: 100 });
 
-      // Format messages into a transcript
-      const transcript = messages.reverse().map(msg => {
-        let content = `(${msg.author.username}) (${msg.author.id})\n- ${msg.content}`;
+      const transcriptContent = messages.reverse().map(msg => {
+        const nickname = msg.member?.nickname || msg.author.username;
+        let content = `<div class="message">
+          <span class="username">${nickname}</span>
+          <span class="timestamp">${msg.createdAt.toLocaleString()}</span>
+          <p class="content">${msg.content}</p>`;
 
-        // Add links to embeds or files
         if (msg.embeds.length > 0) {
-          content += `\n- Embed: ${msg.embeds[0].url}`;
+          content += `<div class="embed">${msg.embeds[0].description || 'Embed'}</div>`;
         }
+
         if (msg.attachments.size > 0) {
-          content += `\n- File: ${msg.attachments.first().url}`;
+          content += `<div class="attachment">
+            <a href="${msg.attachments.first().url}" target="_blank">Attachment</a>
+          </div>`;
         }
 
+        content += '</div>';
         return content;
-      }).join('\n\n');
+      }).join('\n');
 
-      // Create the transcript header
-      const transcriptHeader = `INVESTIGATION ${channel.name.toUpperCase()}\n\n`;
-      const fullTranscript = transcriptHeader + transcript;
+      const transcriptHtml = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Transcript - ${originalTicketId}</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+                .message { background-color: #fff; padding: 10px; margin-bottom: 10px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+                .username { font-weight: bold; color: #007BFF; }
+                .timestamp { color: #666; font-size: 0.9em; margin-left: 10px; }
+                .content { margin-top: 5px; }
+                .embed, .attachment { margin-top: 10px; padding: 5px; background-color: #f9f9f9; border-left: 3px solid #007BFF; }
+                a { color: #007BFF; text-decoration: none; }
+                a:hover { text-decoration: underline; }
+            </style>
+        </head>
+        <body>
+            <h1>Transcript - ${originalTicketId}</h1>
+            <div id="messages">${transcriptContent}</div>
+        </body>
+        </html>
+      `;
 
-      // Save the transcript to the /transcripts folder
-      const transcriptPath = path.join(__dirname, '..', 'transcripts', `${channel.name}.txt`);
-      fs.writeFileSync(transcriptPath, fullTranscript);
+      const transcriptHash = generateHash();
+      const transcriptPath = path.join('/var/www/transcripts', `${transcriptHash}.html`);
+      fs.writeFileSync(transcriptPath, transcriptHtml);
 
-      // Log the transcript in the database
-      await pool.query('INSERT INTO ticket_transcripts (ticket_id, file_path) VALUES (?, ?)', [channel.name, transcriptPath]);
+      await pool.query('INSERT INTO ticket_transcripts (ticket_id, file_path, transcript_hash) VALUES (?, ?, ?)', [originalTicketId, transcriptPath, transcriptHash]);
 
-      // Auto-send the transcript to the transcript channel
+      const transcriptUrl = `http://${process.env.SITE_DOMAIN}/transcripts/${transcriptHash}.html`;
+      await interaction.reply({ content: `Transcript saved: ${transcriptUrl}`, flags: 'Ephemeral' });
+
       const transcriptChannel = interaction.guild.channels.cache.get(process.env.TRANSCRIPT_CHANNEL_ID);
       if (transcriptChannel) {
-        await transcriptChannel.send({
-          content: `Transcript for ${channel.name}:`,
-          files: [transcriptPath],
-        });
+        await transcriptChannel.send({ content: `Transcript for ${originalTicketId}: ${transcriptUrl}` });
       }
-
-      // Reply to the user
-      await interaction.reply({ content: `Transcript saved: ${channel.name}.txt`, flags: 'Ephemeral' });
-
-      // Log the command
-      await logCommand(interaction, 'save');
     } catch (error) {
       console.error('Error saving transcript:', error);
       await interaction.reply({ content: 'There was an error saving the transcript.', flags: 'Ephemeral' });
