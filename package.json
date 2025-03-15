@@ -10,7 +10,8 @@
     "axios": "^1.8.3",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.7",
-    "mysql2": "^3.13.0"
+    "mysql2": "^3.13.0",
+    "ssh2-sftp-client": "^11.0.0"
   },
   "keywords": [],
   "author": "",
