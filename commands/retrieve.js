@@ -1,65 +1,47 @@
-const { SlashCommandBuilder } = require('discord.js');
+// retrieve.js - Retrieves saved transcript with role checks
+const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const db = require('../database/db');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('retrieve')
-    .setDescription('Retrieve a transcript by ticket ID.')
-    .addStringOption(option =>
-      option.setName('ticket_id')
-        .setDescription('The ticket ID (e.g., X-01-0001)')
-        .setRequired(true)),
-  async execute(interaction, pool) {
-    const ticketId = interaction.options.getString('ticket_id');
-    const userRoles = interaction.member.roles.cache;
+    data: new SlashCommandBuilder()
+        .setName('retrieve')
+        .setDescription('Retrieve a saved transcript')
+        .addStringOption(option =>
+            option.setName('ticket_id')
+                .setDescription('The ticket ID to retrieve')
+                .setRequired(true)
+        ),
 
-    try {
-      // Fetch the transcript from the database
-      const [rows] = await pool.query('SELECT * FROM ticket_transcripts WHERE ticket_id = ?', [ticketId]);
+    async execute(interaction) {
+        const ticketId = interaction.options.getString('ticket_id');
+        const userRoles = interaction.member.roles.cache.map(role => role.id);
+        
+        // Extract ticket type (V/I) and clearance level (01/02/03)
+        const match = ticketId.match(/^([VI])-(\d{2})-\d{4}$/);
+        if (!match) return interaction.reply({ content: 'Invalid ticket ID format.', ephemeral: true });
+        
+        const [_, type, clearance] = match;
+        const requiredRoles = {
+            '01': [process.env.ROLE_LOWER_COMMAND, process.env.ROLE_COMMAND, process.env.ROLE_HIGH_COMMAND],
+            '02': [process.env.ROLE_COMMAND, process.env.ROLE_HIGH_COMMAND],
+            '03': [process.env.ROLE_HIGH_COMMAND]
+        };
 
-      if (rows.length === 0) {
-        return interaction.reply({ content: 'Transcript not found.', flags: 'Ephemeral' });
-      }
+        if (!userRoles.some(role => requiredRoles[clearance].includes(role))) {
+            return interaction.reply({ content: 'You do not have permission to retrieve this transcript.', ephemeral: true });
+        }
 
-      const transcript = rows[0];
-
-      // Determine the clearance level of the ticket
-      const clearanceLevel = ticketId.split('-')[1]; // e.g., "01" from "X-01-0001"
-
-      // Check if the user has the required role to retrieve the transcript
-      let hasPermission = false;
-
-      if (clearanceLevel === '01') {
-        // I-CL-01: Lower Command, Command, High Command
-        hasPermission = userRoles.has(process.env.ROLE_LOWER_COMMAND) ||
-                        userRoles.has(process.env.ROLE_COMMAND) ||
-                        userRoles.has(process.env.ROLE_HIGH_COMMAND);
-      } else if (clearanceLevel === '02') {
-        // I-CL-02: Command, High Command
-        hasPermission = userRoles.has(process.env.ROLE_COMMAND) ||
-                        userRoles.has(process.env.ROLE_HIGH_COMMAND);
-      } else if (clearanceLevel === '03') {
-        // I-CL-03: High Command only
-        hasPermission = userRoles.has(process.env.ROLE_HIGH_COMMAND);
-      }
-
-      if (!hasPermission) {
-        return interaction.reply({ content: 'You do not have permission to retrieve this transcript.', flags: 'Ephemeral' });
-      }
-
-      // Send the transcript file to the user
-      await interaction.reply({
-        content: `Transcript for ${ticketId}:`,
-        files: [transcript.file_path],
-        flags: 'Ephemeral',
-      });
-
-      // Log the command
-      await logCommand(interaction, 'retrieve');
-    } catch (error) {
-      console.error('Error retrieving transcript:', error);
-      await interaction.reply({ content: 'There was an error retrieving the transcript.', flags: 'Ephemeral' });
+        // Get transcript file path from database
+        const [result] = await db.query(`SELECT file_path FROM ticket_transcripts WHERE request_id = ?`, [ticketId]);
+        if (!result.length) return interaction.reply({ content: 'No transcript found for this ticket.', ephemeral: true });
+        
+        const transcriptPath = result[0].file_path;
+        if (!fs.existsSync(transcriptPath)) return interaction.reply({ content: 'Transcript file is missing from the server.', ephemeral: true });
+        
+        const file = new AttachmentBuilder(transcriptPath, { name: `${ticketId}.html` });
+        await interaction.reply({ content: `Here is the transcript for **${ticketId}**`, files: [file], ephemeral: true });
     }
-  },
 };

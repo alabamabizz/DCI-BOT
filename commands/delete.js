@@ -1,64 +1,47 @@
+// delete.js - Deletes a closed ticket with permission checks
 const { SlashCommandBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const db = require('../database/db');
+require('dotenv').config();
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('deleteticket')
-    .setDescription('Delete a closed ticket.')
-    .addStringOption(option =>
-      option.setName('reason')
-        .setDescription('Reason for deleting the ticket')
-        .setRequired(true)),
-  async execute(interaction, pool) {
-    const channel = interaction.channel;
-    const reason = interaction.options.getString('reason');
+    data: new SlashCommandBuilder()
+        .setName('deleteticket')
+        .setDescription('Delete a closed ticket.')
+        .addStringOption(option =>
+            option.setName('reason')
+                .setDescription('Reason for deleting the ticket')
+                .setRequired(true)),
 
-    try {
-      // Check if the channel is a ticket (starts with "X-" or "I-")
-      if (!channel.name.startsWith('X-') && !channel.name.startsWith('I-')) {
-        return interaction.reply({ content: 'This command can only be used in ticket channels.', flags: 'Ephemeral' });
-      }
+    async execute(interaction) {
+        const channel = interaction.channel;
+        const userRoles = interaction.member.roles.cache.map(role => role.id);
+        const reason = interaction.options.getString('reason');
 
-      // Fetch the ticket from the database
-      const [rows] = await pool.query('SELECT * FROM investigation_requests WHERE channel_id = ?', [channel.id]);
+        // Find ticket in database
+        const [ticket] = await db.query(`SELECT request_id, status FROM investigation_requests WHERE channel_id = ? UNION SELECT request_id, status FROM intelligence_requests WHERE channel_id = ?`, [channel.id, channel.id]);
+        if (!ticket.length) return interaction.reply({ content: 'This channel is not a valid ticket.', ephemeral: false });
+        
+        const requestId = ticket[0].request_id;
+        if (ticket[0].status !== 'closed') return interaction.reply({ content: 'Only closed tickets can be deleted.', ephemeral: false });
+        
+        // Extract clearance level
+        const match = requestId.match(/^([VI])-(\d{2})-\d{4}$/);
+        if (!match) return interaction.reply({ content: 'Invalid ticket ID format.', ephemeral: false });
+        
+        const [_, type, clearance] = match;
+        const requiredRoles = {
+            '01': [process.env.ROLE_LOWER_COMMAND, process.env.ROLE_COMMAND, process.env.ROLE_HIGH_COMMAND],
+            '02': [process.env.ROLE_COMMAND, process.env.ROLE_HIGH_COMMAND],
+            '03': [process.env.ROLE_HIGH_COMMAND]
+        };
 
-      if (rows.length === 0) {
-        return interaction.reply({ content: 'This channel is not associated with a ticket.', flags: 'Ephemeral' });
-      }
+        if (!userRoles.some(role => requiredRoles[clearance].includes(role))) {
+            return interaction.reply({ content: 'You do not have permission to delete this ticket.', ephemeral: true });
+        }
 
-      const ticket = rows[0];
+        await channel.delete(`Ticket deleted by ${interaction.user.tag}. Reason: ${reason}`);
+        await db.query(`DELETE FROM investigation_requests WHERE request_id = ? UNION DELETE FROM intelligence_requests WHERE request_id = ?`, [requestId, requestId]);
 
-      // Check if the ticket is closed
-      if (ticket.status !== 'closed') {
-        return interaction.reply({ content: 'Only closed tickets can be deleted.', flags: 'Ephemeral' });
-      }
-
-      // Fetch all messages in the channel
-      const messages = await channel.messages.fetch({ limit: 100 });
-
-      // Format messages into a transcript (ignore messages after the "Ticket Closed" embed)
-      const transcript = messages.reverse().filter(msg => {
-        return !msg.embeds.some(embed => embed.description === 'This request has been closed.');
-      }).map(msg => {
-        return `[${msg.author.username}] ${msg.createdAt.toLocaleString()}: ${msg.content}`;
-      }).join('\n');
-
-      // Save the transcript to the /transcripts folder
-      const transcriptPath = path.join(__dirname, '..', 'transcripts', `${channel.name}.txt`);
-      fs.writeFileSync(transcriptPath, transcript);
-
-      // Delete the channel
-      await channel.delete(`Ticket deleted by ${interaction.user.tag}. Reason: ${reason}`);
-
-      // Delete the ticket from the database
-      await pool.query('DELETE FROM investigation_requests WHERE channel_id = ?', [channel.id]);
-
-      // Reply to the user (visible to everyone)
-      await interaction.reply({ content: `Ticket deleted and transcript saved: ${channel.name}.txt` });
-    } catch (error) {
-      console.error('Error deleting ticket:', error);
-      await interaction.reply({ content: 'There was an error deleting the ticket.', flags: 'Ephemeral' });
+        interaction.reply({ content: `Ticket **${requestId}** deleted successfully.`, ephemeral: false });
     }
-  },
 };
